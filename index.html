@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>US forest cover, live from the World Bank API</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --paper: #EEF1EC;
+    --ink: #17231B;
+    --conifer: #1F5A3A;
+    --moss: #7FA37A;
+    --stump: #C4521C;
+    --line: #CBD3C8;
+    --muted: #55645A;
+    --display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+    --body: "Newsreader", Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html { color-scheme: light; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 1.125rem;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 1.25rem; }
+
+  /* Hero */
+  header { padding: 3.5rem 0 2rem; }
+  h1 {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(2.4rem, 7vw, 5rem);
+    line-height: 1.02;
+    letter-spacing: -0.03em;
+    margin: 0 0 1rem;
+    max-width: 14ch;
+  }
+  .answer {
+    font-size: clamp(1.25rem, 2.6vw, 1.6rem);
+    max-width: 38ch;
+    margin: 0;
+    min-height: 3.2em;
+  }
+  .answer strong { font-family: var(--display); font-weight: 800; color: var(--conifer); }
+  .answer strong.loss { color: var(--stump); }
+
+  /* Controls */
+  .controls {
+    display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center;
+    padding: 1rem 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+    font-family: var(--display); font-size: .95rem;
+  }
+  select {
+    font: inherit; padding: .45rem .75rem; border: 1.5px solid var(--ink);
+    background: #fff; color: var(--ink); border-radius: 4px;
+  }
+  select:focus-visible, button:focus-visible { outline: 3px solid var(--moss); outline-offset: 2px; }
+  #status { color: var(--muted); margin-left: auto; }
+
+  /* Stats */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1.5rem; padding: 2rem 0; }
+  .stat dt { font-family: var(--display); font-size: .95rem; color: var(--muted); }
+  .stat dd { margin: .15rem 0 0; font-family: var(--display); font-weight: 800; font-size: 2rem; letter-spacing: -0.02em; }
+  .stat small { display: block; font-family: var(--body); font-weight: 400; font-size: .95rem; color: var(--muted); letter-spacing: 0; }
+
+  /* Charts */
+  section.chart { padding: 1.5rem 0 2rem; }
+  h2 { font-family: var(--display); font-weight: 800; font-size: 1.5rem; margin: 0 0 .25rem; letter-spacing: -0.01em; }
+  .caption { color: var(--muted); font-size: 1rem; margin: 0 0 1rem; max-width: 62ch; }
+  .canvas-box { position: relative; height: 340px; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: .75rem; }
+
+  .legend { display: flex; gap: 1.25rem; font-family: var(--display); font-size: .9rem; margin-bottom: .75rem; }
+  .legend span::before { content: ""; display: inline-block; width: .8rem; height: .8rem; border-radius: 2px; margin-right: .4rem; vertical-align: -1px; }
+  .legend .gain::before { background: var(--conifer); }
+  .legend .drop::before { background: var(--stump); }
+
+  /* Notes + errors */
+  .notes { border-top: 1px solid var(--line); padding: 1.5rem 0 3rem; color: var(--muted); font-size: 1rem; }
+  .notes p { max-width: 70ch; margin: 0 0 .75rem; }
+  .notes a { color: var(--conifer); }
+  .error {
+    display: none; margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 5px solid var(--stump);
+    background: #fff; font-size: 1rem;
+  }
+  .error.show { display: block; }
+  code { font-size: .9em; background: #fff; padding: .1em .35em; border-radius: 3px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="title">Is the US losing its forests?</h1>
+    <p class="answer" id="answer" aria-live="polite">Loading the latest numbers…</p>
+  </header>
+
+  <div class="controls">
+    <label for="country">Country</label>
+    <select id="country">
+      <option value="USA" selected>United States</option>
+      <option value="CAN">Canada</option>
+      <option value="BRA">Brazil</option>
+      <option value="IDN">Indonesia</option>
+      <option value="CHN">China</option>
+      <option value="RUS">Russia</option>
+    </select>
+    <span id="status" role="status"></span>
+  </div>
+
+  <div class="error" id="error" role="alert"></div>
+
+  <dl class="stats" id="stats"></dl>
+
+  <section class="chart">
+    <h2>Total forest area</h2>
+    <p class="caption">Square kilometers of forest, one point per year. The vertical axis does not start at zero, so small changes look bigger than they are.</p>
+    <div class="canvas-box"><canvas id="areaChart" aria-label="Line chart of total forest area by year" role="img"></canvas></div>
+  </section>
+
+  <section class="chart">
+    <h2>Change from the year before</h2>
+    <p class="caption">Net change in forest area compared with the previous year.</p>
+    <div class="legend"><span class="gain">Forest grew</span><span class="drop">Forest shrank</span></div>
+    <div class="canvas-box"><canvas id="changeChart" aria-label="Bar chart of yearly change in forest area" role="img"></canvas></div>
+  </section>
+
+  <div class="notes">
+    <p><strong>What this shows.</strong> These are <em>net</em> changes: forest lost to clearing, fire, or development minus forest that regrows or is planted. A country can lose old forest and still show growth here. Data is national, not by state.</p>
+    <p><strong>Where the data comes from.</strong> Live requests to the open <a href="https://datahelpdesk.worldbank.org/knowledgebase/articles/889392-about-the-indicators-api-documentation" target="_blank" rel="noopener">World Bank Indicators API</a>, using the indicators <code>AG.LND.FRST.K2</code> (forest area, sq km) and <code>AG.LND.FRST.ZS</code> (forest area, % of land). The World Bank sources these from the UN Food and Agriculture Organization.</p>
+  </div>
+</div>
+
+<script>
+  const API = "https://api.worldbank.org/v2/country/";
+  const nf = new Intl.NumberFormat("en-US");
+  const COLORS = { conifer: "#1F5A3A", moss: "#7FA37A", stump: "#C4521C" };
+  let areaChart, changeChart;
+
+  const $ = (id) => document.getElementById(id);
+
+  async function fetchIndicator(country, indicator) {
+    const url = `${API}${country}/indicator/${indicator}?format=json&per_page=100`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`World Bank API returned ${res.status}`);
+    const json = await res.json();
+    const rows = json[1];
+    if (!rows) throw new Error("The API returned no data for this country.");
+    return rows
+      .filter((r) => r.value !== null)
+      .map((r) => ({ year: Number(r.date), value: r.value }))
+      .sort((a, b) => a.year - b.year);
+  }
+
+  function renderStats(country, area, pct) {
+    const first = area[0];
+    const last = area[area.length - 1];
+    const change = last.value - first.value;
+    const changePct = (change / first.value) * 100;
+
+    // Biggest single-year drop
+    let worst = null;
+    for (let i = 1; i < area.length; i++) {
+      const d = area[i].value - area[i - 1].value;
+      if (worst === null || d < worst.delta) worst = { year: area[i].year, delta: d };
+    }
+    const lastPct = pct.length ? pct[pct.length - 1] : null;
+    const sign = change >= 0 ? "+" : "−";
+    const word = change >= 0 ? "grown" : "shrunk";
+    const cls = change >= 0 ? "" : "loss";
+
+    $("answer").innerHTML =
+      `Net forest area has ${word} by <strong class="${cls}">${nf.format(Math.abs(Math.round(change)))} km²</strong> ` +
+      `(${sign}${Math.abs(changePct).toFixed(1)}%) between ${first.year} and ${last.year}.`;
+
+    const items = [
+      ["Forest area, " + last.year, nf.format(Math.round(last.value)) + " km²", ""],
+      ["Share of land", lastPct ? lastPct.value.toFixed(1) + "%" : "n/a", lastPct ? "in " + lastPct.year : ""],
+      ["Change since " + first.year, sign + nf.format(Math.abs(Math.round(change))) + " km²", sign + Math.abs(changePct).toFixed(1) + "%"],
+      ["Biggest one-year change down",
+        worst && worst.delta < 0 ? "−" + nf.format(Math.abs(Math.round(worst.delta))) + " km²" : "None",
+        worst && worst.delta < 0 ? "in " + worst.year : "No year shows a net drop"],
+    ];
+    $("stats").innerHTML = items
+      .map(([t, v, s]) => `<div class="stat"><dt>${t}</dt><dd>${v}<small>${s}</small></dd></div>`)
+      .join("");
+  }
+
+  function renderCharts(area) {
+    const years = area.map((d) => d.year);
+    const values = area.map((d) => d.value);
+    const deltas = area.slice(1).map((d, i) => d.value - area[i].value);
+
+    if (areaChart) areaChart.destroy();
+    if (changeChart) changeChart.destroy();
+
+    areaChart = new Chart($("areaChart"), {
+      type: "line",
+      data: {
+        labels: years,
+        datasets: [{
+          data: values,
+          borderColor: COLORS.conifer,
+          backgroundColor: "rgba(127,163,122,.25)",
+          fill: true,
+          tension: 0.25,
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          borderWidth: 3,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (c) => nf.format(Math.round(c.parsed.y)) + " km²" } },
+        },
+        scales: {
+          y: { ticks: { callback: (v) => nf.format(v) }, title: { display: true, text: "sq km" } },
+          x: { ticks: { maxTicksLimit: 8 } },
+        },
+      },
+    });
+
+    changeChart = new Chart($("changeChart"), {
+      type: "bar",
+      data: {
+        labels: years.slice(1),
+        datasets: [{
+          data: deltas,
+          backgroundColor: deltas.map((d) => (d < 0 ? COLORS.stump : COLORS.conifer)),
+          borderRadius: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (c) => (c.parsed.y >= 0 ? "+" : "−") + nf.format(Math.abs(Math.round(c.parsed.y))) + " km²",
+            },
+          },
+        },
+        scales: {
+          y: { ticks: { callback: (v) => nf.format(v) }, title: { display: true, text: "sq km vs. previous year" } },
+          x: { ticks: { maxTicksLimit: 8 } },
+        },
+      },
+    });
+  }
+
+  async function load(code) {
+    const name = $("country").selectedOptions[0].textContent;
+    $("error").classList.remove("show");
+    $("status").textContent = "Fetching from World Bank…";
+    $("title").textContent = code === "USA" ? "Is the US losing its forests?" : `Is ${name} losing its forests?`;
+    $("answer").textContent = "Loading the latest numbers…";
+    try {
+      const [area, pct] = await Promise.all([
+        fetchIndicator(code, "AG.LND.FRST.K2"),
+        fetchIndicator(code, "AG.LND.FRST.ZS"),
+      ]);
+      if (area.length < 2) throw new Error("Not enough years of data to show a trend.");
+      renderStats(code, area, pct);
+      renderCharts(area);
+      $("status").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+      $("answer").textContent = "The data didn't load.";
+      $("stats").innerHTML = "";
+      $("error").textContent =
+        "Couldn't load data from the World Bank API (" + err.message + "). " +
+        "Check your internet connection and reload. If you opened this file from a preview that blocks outside requests, open it in a regular browser tab or host it on a site.";
+      $("error").classList.add("show");
+      $("status").textContent = "";
+    }
+  }
+
+  $("country").addEventListener("change", (e) => load(e.target.value));
+  load("USA");
+</script>
+</body>
+</html>
